@@ -1,5 +1,6 @@
 package com.example.myapp.member.controller;
 
+import java.security.Principal;
 import java.util.UUID;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -9,6 +10,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.validation.BindingResult;
@@ -17,6 +21,8 @@ import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.InitBinder;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+
 import com.example.myapp.member.MemberValidator;
 import com.example.myapp.member.model.Member;
 import com.example.myapp.member.service.IMemberService;
@@ -31,6 +37,9 @@ public class MemberController {
 	
 	@Autowired
 	MemberValidator memberValidator;
+	
+	@Autowired
+	PasswordEncoder passwordEncoder;
 	
 	@InitBinder
 	private void initBinder(WebDataBinder binder) {
@@ -65,6 +74,9 @@ public class MemberController {
 				model.addAttribute("message", "MEMBER_PW_RE");
 				return "member/form";
 			}
+			
+			String encodedPw = passwordEncoder.encode(member.getPassword());
+			member.setPassword(encodedPw);
 			memberService.insertMember(member);
 		} catch (DuplicateKeyException e) {
 			member.setUserid(null);
@@ -108,8 +120,10 @@ public class MemberController {
 	}
 	
 	@GetMapping(value="/member/update")
-	public String updateMember(HttpSession session, Model model) {
-		String userid = (String)session.getAttribute("userid");
+	public String updateMember(Model model) {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		String userid = auth.getName();
+		
 		if(userid != null && !userid.equals("")) {
 			Member member = memberService.selectMember(userid);
 			model.addAttribute("member", member);
@@ -122,13 +136,15 @@ public class MemberController {
 	}
 	
 	@PostMapping(value="/member/update")
-	public String updateMember (@Validated Member member, BindingResult result, HttpSession session, Model model) {
+		public String updateMember (@Validated Member member, BindingResult result, HttpSession session, Model model) {
 		
 		if (result.hasErrors()) {
 			model.addAttribute("member", member);
 			return "member/update";
 		}
 		try {
+			String encodedPw = passwordEncoder.encode(member.getPassword());
+			member.setPassword(encodedPw);
 			memberService.updateMember(member);
 			model.addAttribute("message", "UPDATE_MEMBER_INFO");
 			model.addAttribute("member", member);
@@ -142,8 +158,9 @@ public class MemberController {
 	}
 	
 	@GetMapping(value="/member/delete")
-	public String deleteMember (HttpSession session, Model model) {
-		String userid = (String)session.getAttribute("userid");
+	public String deleteMember (Model model) {
+		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+		String userid = auth.getName();
 		if(userid != null && !userid.equals("")) {
 			Member member = memberService.selectMember(userid);
 			model.addAttribute("member", member);
@@ -156,16 +173,16 @@ public class MemberController {
 	}
 	
 	@PostMapping(value="/member/delete")
-	public String deleteMember (String password, HttpSession session, Model model) {
+	public String deleteMember (String password, Principal principal, RedirectAttributes model) {
 		try {
 			Member member = new Member();
-			member.setUserid((String)session.getAttribute("userid"));
+			member.setUserid(principal.getName());
 			String dbpw = memberService.getPassword(member.getUserid());
-			if (password != null && password.equals(dbpw)) {
-				member.setPassword(password);
+			if (password != null && passwordEncoder.matches(password, dbpw)) {
+				member.setPassword(dbpw);
 				memberService.deleteMember(member);
-				session.invalidate();
-				return "member/login";
+				model.addFlashAttribute("message","DELETE_USER_INFO");
+				return "redirect:/member/logout";
 			} else {
 				model.addAttribute("message", "WRONG_PASSWORD");
 				return "member/delete";
